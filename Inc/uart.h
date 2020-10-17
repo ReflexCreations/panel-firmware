@@ -3,6 +3,7 @@
 
 #include "bool.h"
 #include "stm32f3xx.h"
+#include "debug_leds.h"
 
 typedef struct {
     uint8_t transmit_data[8];
@@ -18,6 +19,7 @@ void uart_init(void);
 
 inline void uart_send(void) {
     uart_txbuffer.sending = true;
+    DBG_LED2_ON();
     HAL_UART_Transmit_DMA(&huart1, uart_txbuffer.transmit_data, 8);
 }
 

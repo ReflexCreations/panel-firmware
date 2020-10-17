@@ -3,16 +3,7 @@
 #include "led.h"
 #include "uart.h"
 #include "bool.h"
-
-#define DBG_LED1_ON() HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET)
-#define DBG_LED1_OFF() HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET)
-#define DBG_LED1_TOGGLE() HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0)
-#define DBG_LED2_ON() HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET)
-#define DBG_LED2_OFF() HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET)
-#define DBG_LED2_TOGGLE() HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1)
-#define DBG_LED3_ON() HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET)
-#define DBG_LED3_OFF() HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET)
-#define DBG_LED3_TOGGLE() HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3)
+#include "debug_leds.h"
 
 typedef enum {
   CMD_REQUEST_SENSORS = 0x01,
@@ -34,10 +25,9 @@ static void MX_GPIO_Init(void);
 
 int main(void) {
   HAL_Init();
-
+  MX_GPIO_Init();
   SystemClock_Config();
 
-  MX_GPIO_Init();
   uart_init();
   adc_init();
   led_init();
