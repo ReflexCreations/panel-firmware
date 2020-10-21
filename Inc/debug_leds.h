@@ -13,4 +13,14 @@
 #define DBG_LED3_OFF() HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET)
 #define DBG_LED3_TOGGLE() HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3)
 
+#define DBG_SR(__val) (__val ? GPIO_PIN_SET : GPIO_PIN_RESET)
+#define DBG_EXT_WRITE(__WORD) do { \
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, DBG_SR(__WORD & 0B0001)); \
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, DBG_SR(__WORD & 0B0010)); \
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, DBG_SR(__WORD & 0B0100)); \
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, DBG_SR(__WORD & 0B1000)); \
+} while (0U);
+
+
+
 #endif

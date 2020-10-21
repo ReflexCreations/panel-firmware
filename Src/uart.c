@@ -1,4 +1,6 @@
 #include "uart.h"
+#include "command.h"
+#include "debug_leds.h"
 
 
 DMA_HandleTypeDef hdma_usart1_tx;
@@ -10,15 +12,42 @@ void Error_Handler();
 static void init_gpio();
 static void init_periph();
 static void init_dma();
+static void process_command(Command);
+
+static inline void setStatus(PortStatus newStatus) {
+    port_state.status = newStatus;
+    DBG_EXT_WRITE((uint8_t)newStatus);
+}
 
 void uart_init() {
     init_gpio();
     init_dma();
     init_periph();
 
+    setStatus(Status_Idle);
+    port_state.have_led_packet = false;
+    port_state.should_commit_leds = false;
+
     // UART, CK - configures it as an output, but irrelevant;
     // using USART periph as UART, clock pin disregarded.
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
+}
+
+void uart_stop() {
+    //setStatus(Status_Halted);
+}
+
+void uart_start() {
+    //setStatus(Status_Idle);
+}
+
+void uart_take_led_packet(uint8_t * target) {
+    if (!port_state.have_led_packet) return;
+    port_state.have_led_packet = false;
+
+    for (uint8_t i = 0; i < 64; i++) {
+        target[i] = port_state.led_packet[i];
+    }
 }
 
 static void init_gpio() {
@@ -44,14 +73,14 @@ static void init_gpio() {
 
 static void init_periph() {
     huart1.Instance = USART1;
-    huart1.Init.BaudRate = 512000;
+    huart1.Init.BaudRate = 1984000;//512000;
     huart1.Init.WordLength = UART_WORDLENGTH_8B;
     huart1.Init.StopBits = UART_STOPBITS_2;
     huart1.Init.Parity = UART_PARITY_NONE;
     huart1.Init.Mode = UART_MODE_TX_RX;
     huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-    huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-    huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+    huart1.Init.OverSampling = UART_OVERSAMPLING_8; // 16
+    huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_ENABLE; // DIS
     huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
 
     HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);
@@ -71,14 +100,76 @@ static void init_dma() {
     HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 }
 
+// No idea what I ought to name this... advance the state machine
+void uart_advance() {
+    switch (port_state.status) {
+        case Status_Idle:
+            HAL_UART_Receive_DMA(&huart1, &port_state.raw_command, 1);
+            setStatus(Status_Receiving_Command);
+            break;
+
+        case Status_Receiving_Command:
+            break;
+
+        case Status_Received_Command:
+            process_command(port_state.current_command);
+            break;
+
+        case Status_Receiving_Data:
+            break;
+
+        case Status_Received_Data:
+            if (port_state.current_command == CMD_TRANSMIT_LED_DATA) {
+                port_state.have_led_packet = true;
+            }
+
+            setStatus(Status_Idle);
+            break;
+
+        case Status_Sending_Response:
+            break;
+
+        case Status_Halted:
+            break;
+    }
+}
+
+static void process_command(Command command) {
+    switch (command) {
+        case CMD_REQUEST_SENSORS:
+            setStatus(Status_Sending_Response);
+            HAL_UART_Transmit_DMA(&huart1, port_state.sensor_data, 8);
+            break;
+
+        case CMD_TRANSMIT_LED_DATA:
+            setStatus(Status_Receiving_Data);
+            HAL_UART_Receive_DMA(&huart1, port_state.led_packet, 64);
+            break;
+
+        case CMD_COMMIT_LEDS:
+            setStatus(Status_Idle);
+            port_state.should_commit_leds = true;
+            break;
+    }
+}
+
 void USART1_IRQHandler() { HAL_UART_IRQHandler(&huart1); }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {	
-    DBG_LED2_OFF();
-    uart_txbuffer.sending = false;
+    //DBG_LED2_OFF();
+    setStatus(Status_Idle);
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{	
+{
+    switch (port_state.status) {
+        case Status_Receiving_Command:
+            port_state.current_command = (port_state.raw_command >> 4) & 0x0F;
+            setStatus(Status_Received_Command);
+            break;
+        case Status_Receiving_Data:
+            setStatus(Status_Received_Data);
+            break;
+    }
 }

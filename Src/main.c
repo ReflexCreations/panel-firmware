@@ -4,16 +4,10 @@
 #include "uart.h"
 #include "bool.h"
 #include "debug_leds.h"
-
-typedef enum {
-  CMD_REQUEST_SENSORS = 0x01,
-  CMD_TRANSMIT_LED_DATA = 0x02,
-  CMD_COMMIT_LEDS = 0x03
-} command_t;
+#include "command.h"
 
 // uart.c
-extern UART_HandleTypeDef huart1;
-extern uart_txbuffer_t uart_txbuffer;
+extern PortState port_state;
 
 // adc.c
 extern bool adc_ready;
@@ -34,55 +28,38 @@ int main(void) {
 
   DBG_LED1_ON();
 
-  uint8_t command_raw;
   uint8_t in_buffer[64];
   output_data.beingRead = false;
   
   while (1) {
-    // If there was data to be sent via UART, while it was already still sending,
-    // this ensures that data is moved into the array that will be used for DMA
-    uart_move_queue();
-
-    HAL_UART_Receive(&huart1, &command_raw, 1, HAL_MAX_DELAY);
-    
-    command_t command_value = (command_raw >> 4) & 0x0F;
-
-    if (command_value == CMD_REQUEST_SENSORS){
-      DBG_LED1_TOGGLE();
-
-      // Split 16 bit sensor data into bytes, for byte-aligned transmission
-      output_data.beingRead = 1;
-
-      // Select which buffer we're going to write to based on whether we're currently sending
-      // If we are sending, we stick it in queued data, otherwise in transmit_data.
-      bool was_sending = uart_txbuffer.sending;
-      uint8_t *tx_buffer_arr = was_sending 
-        ? uart_txbuffer.queued_data
-        : uart_txbuffer.transmit_data;
-
-      for (uint8_t i = 0; i < 4; i++){
-        tx_buffer_arr[i * 2 + 0] = output_data.data[i].as_bytes[0];
-        tx_buffer_arr[i * 2 + 1] = output_data.data[i].as_bytes[1];
-      }
-      output_data.beingRead = 0;
-      uart_txbuffer.has_queued_data = was_sending;
-
-      // With the queueing system this should only ever, at most, be one
-      // reading behind the actual thing. If it's still slow, the queued
-      // data is overridden for the next send
-      uart_send();
-
-    } else if (command_value == CMD_TRANSMIT_LED_DATA) {
-
-      // TODO: uart_receive stuff to go in uart.c
-      HAL_UART_Receive(&huart1, in_buffer, 64, HAL_MAX_DELAY);
+    if (port_state.have_led_packet) {
+      uart_take_led_packet(in_buffer);
       led_prepare_input(in_buffer);
-
-    } else if (command_value == CMD_COMMIT_LEDS) {
-
-      led_send_buffer();
-
     }
+
+    if (port_state.should_commit_leds) {
+      port_state.should_commit_leds = false;
+      led_send_buffer();
+    }
+
+    if (port_state.status == Status_Received_Command) {
+      switch (port_state.current_command) {
+        // Request sensors needs our bit of work here before responding
+        case CMD_REQUEST_SENSORS:
+          DBG_LED2_ON();
+          output_data.beingRead = true;
+          for (uint8_t i = 0; i < 4; i++) {
+            port_state.sensor_data[i * 2 + 0] = output_data.data[i].as_bytes[0];
+            port_state.sensor_data[i * 2 + 1] = output_data.data[i].as_bytes[1];
+          }
+          output_data.beingRead = false;
+          break;
+
+        default: break;
+      }
+    }
+
+    uart_advance();
   }
 }
 

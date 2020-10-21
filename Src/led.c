@@ -1,5 +1,7 @@
 #include "led.h"
 #include "adc.h"
+#include "uart.h"
+
 
 #define LED_PORT GPIOB
 #define LED_PINS GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7
@@ -53,6 +55,7 @@ void led_prepare_input(uint8_t *led_buffer){
 void led_send_buffer() {
     // Stop ADC collection while sending LED buffer
     adc_stop();
+    uart_stop();
 
 	HAL_DMA_Start(&dma_update, (uint32_t) led_pin_ref, (uint32_t) &LED_PORT->BSRR, LEN_BUFFER);
 	HAL_DMA_Start(&dma_channel_1, (uint32_t) led_data, (uint32_t) &LED_PORT->BRR, LEN_BUFFER);
@@ -158,6 +161,7 @@ void transfer_complete_handler(DMA_HandleTypeDef *dma_handle){
 
     // Restart the ADC now LED transfer is complete
     adc_start();
+    uart_start();
 
     for(uint16_t address = 0; address < LEN_BUFFER; address++){
         led_data[address] = 0xFF;

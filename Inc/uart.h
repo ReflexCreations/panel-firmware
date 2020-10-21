@@ -2,37 +2,38 @@
 #define __UART_H
 
 #include "bool.h"
+#include "command.h"
 #include "stm32f3xx.h"
 #include "debug_leds.h"
 
-typedef struct {
-    uint8_t transmit_data[8];
-    uint8_t queued_data[8];
-    bool sending;
-    bool has_queued_data;
-} uart_txbuffer_t;
+typedef enum {
+  Status_Idle = 0B000,
+  Status_Receiving_Command = 0B0001,
+  Status_Received_Command = 0B0010,
+  Status_Receiving_Data = 0B0011,
+  Status_Received_Data = 0B0100,
+  Status_Sending_Response = 0B0101,
+  Status_Halted = 0B0110
+} PortStatus;
 
-uart_txbuffer_t uart_txbuffer;
+typedef struct {
+  PortStatus status;
+  uint8_t raw_command;
+  Command current_command;
+  uint8_t sensor_data[8];
+  uint8_t led_packet[64];
+  bool have_led_packet;
+  bool should_commit_leds;
+} PortState;
+
+PortState port_state;
+
 UART_HandleTypeDef huart1;
 
 void uart_init(void);
-
-inline void uart_send(void) {
-    uart_txbuffer.sending = true;
-    DBG_LED2_ON();
-    HAL_UART_Transmit_DMA(&huart1, uart_txbuffer.transmit_data, 8);
-}
-
-inline void uart_move_queue(void) {
-    if (!uart_txbuffer.has_queued_data || uart_txbuffer.sending) {
-      return;
-    }
-
-    for (uint8_t i = 0; i < 8; i++) {
-      uart_txbuffer.transmit_data[i] = uart_txbuffer.queued_data[i];
-    }
-
-    uart_txbuffer.has_queued_data = false;
-}
+void uart_advance();
+void uart_take_led_packet(uint8_t *);
+void uart_start();
+void uart_stop();
 
 #endif
