@@ -19,6 +19,7 @@ typedef struct {
 } GuardedData;
 
 void adc_init();
+void adc_read_into(uint8_t *);
 void adc_start();
 void adc_stop();
 

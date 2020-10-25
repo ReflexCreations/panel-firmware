@@ -1,22 +1,45 @@
 #include "uart.h"
-#include "command.h"
 #include "debug_leds.h"
-
 
 DMA_HandleTypeDef hdma_usart1_tx;
 DMA_HandleTypeDef hdma_usart1_rx;
-
 
 void Error_Handler();
 
 static void init_gpio();
 static void init_periph();
 static void init_dma();
-static void process_command(Command);
 
 static inline void setStatus(PortStatus newStatus) {
     port_state.status = newStatus;
-    DBG_EXT_WRITE((uint8_t)newStatus);
+}
+
+// Returns true if any interrupt flags were present
+static inline uint8_t process_interrupt_flags() {
+    if (port_state.flag_rx_complete) {
+        port_state.flag_rx_complete = false;
+
+        switch (port_state.status) {
+            case Status_Receiving_Command:
+                setStatus(Status_Received_Command);
+                break;
+
+            case Status_Receiving_Data:
+                setStatus(Status_Received_Data);
+                break;
+        }
+
+        return true;
+    }
+
+    if (port_state.flag_tx_complete) {
+        port_state.flag_tx_complete = false;
+
+        setStatus(Status_Idle);
+        return true;
+    }
+
+    return false;
 }
 
 void uart_init() {
@@ -25,30 +48,102 @@ void uart_init() {
     init_periph();
 
     setStatus(Status_Idle);
-    port_state.have_led_packet = false;
-    port_state.should_commit_leds = false;
 
     // UART, CK - configures it as an output, but irrelevant;
     // using USART periph as UART, clock pin disregarded.
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
 }
 
-void uart_stop() {
-    //setStatus(Status_Halted);
-}
+void uart_advance() {
+    if (port_state.status == Status_Halted) return;
+    if (process_interrupt_flags()) return;
 
-void uart_start() {
-    //setStatus(Status_Idle);
-}
+    switch (port_state.status) {
+        case Status_Idle:
+            port_state.send_data = NULL;
+            port_state.send_length = 0;
+            port_state.receive_data = NULL;
+            port_state.receive_length = 0;
 
-void uart_take_led_packet(uint8_t * target) {
-    if (!port_state.have_led_packet) return;
-    port_state.have_led_packet = false;
+            setStatus(Status_Receiving_Command);
+            HAL_UART_Receive_DMA(&huart1, &port_state.current_command, 1);
+            break;
 
-    for (uint8_t i = 0; i < 64; i++) {
-        target[i] = port_state.led_packet[i];
+        // Waiting.
+        case Status_Receiving_Command: break;
+
+        case Status_Received_Command:
+            // If we are expecting more data to come in, go to receiving mode
+            if (port_state.receive_length > 0) {
+                setStatus(Status_Receiving_Data);
+
+                // Note: This assumes that we're setting up "receive" quick
+                // enough, as the IO board will just start sending data very
+                // soon after the command.
+                // Should there ever be an issue here where we're not picking
+                // up data after the command, perhaps the system should be
+                // changed to include an acknowledge message being sent back
+                // from the panel, at which time it immediately begins
+                // receiving.
+                HAL_UART_Receive_DMA(
+                    &huart1,
+                    port_state.receive_data,
+                    port_state.receive_length
+                );
+
+                break;
+            }
+
+            // Alternatively, if we're expected to send data, go to sending mode
+            // Note: only if we're not also expected to receive more data first            
+            if (port_state.send_length > 0) {
+                setStatus(Status_Sending_Response);
+                HAL_UART_Transmit_DMA(
+                    &huart1,
+                    port_state.send_data,
+                    port_state.send_length
+                );
+
+                break;
+            }
+
+            // If neither of the two apply, done handle command, back to idle.
+            setStatus(Status_Idle);
+            break;
+
+        // Waiting.
+        case Status_Receiving_Data: break;
+
+        case Status_Received_Data:
+            // If we're expecting to send some data back now we've finished
+            // receiving data, go to sending mode.
+            if (port_state.send_length > 0) {
+                setStatus(Status_Sending_Response);
+                HAL_UART_Transmit_DMA(
+                    &huart1,
+                    port_state.send_data,
+                    port_state.send_length
+                );
+
+                break;
+            }
+
+            // Otherwise, go back to Idle.
+            setStatus(Status_Idle);
+            break;
+
+        // Waiting.
+        case Status_Sending_Response: break;
     }
 }
+
+PortStatus uart_status() {
+    return port_state.status;
+}
+
+void uart_stop() { setStatus(Status_Halted); }
+
+void uart_start() { setStatus(Status_Idle); }
 
 static void init_gpio() {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -79,12 +174,11 @@ static void init_periph() {
     huart1.Init.Parity = UART_PARITY_NONE;
     huart1.Init.Mode = UART_MODE_TX_RX;
     huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-    huart1.Init.OverSampling = UART_OVERSAMPLING_8; // 16
-    huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_ENABLE; // DIS
+    huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+    huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
     huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
 
-    HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);
-    
+    HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);    
     HAL_NVIC_EnableIRQ(USART1_IRQn);
 
     if (HAL_UART_Init(&huart1) != HAL_OK){
@@ -100,76 +194,12 @@ static void init_dma() {
     HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 }
 
-// No idea what I ought to name this... advance the state machine
-void uart_advance() {
-    switch (port_state.status) {
-        case Status_Idle:
-            HAL_UART_Receive_DMA(&huart1, &port_state.raw_command, 1);
-            setStatus(Status_Receiving_Command);
-            break;
-
-        case Status_Receiving_Command:
-            break;
-
-        case Status_Received_Command:
-            process_command(port_state.current_command);
-            break;
-
-        case Status_Receiving_Data:
-            break;
-
-        case Status_Received_Data:
-            if (port_state.current_command == CMD_TRANSMIT_LED_DATA) {
-                port_state.have_led_packet = true;
-            }
-
-            setStatus(Status_Idle);
-            break;
-
-        case Status_Sending_Response:
-            break;
-
-        case Status_Halted:
-            break;
-    }
-}
-
-static void process_command(Command command) {
-    switch (command) {
-        case CMD_REQUEST_SENSORS:
-            setStatus(Status_Sending_Response);
-            HAL_UART_Transmit_DMA(&huart1, port_state.sensor_data, 8);
-            break;
-
-        case CMD_TRANSMIT_LED_DATA:
-            setStatus(Status_Receiving_Data);
-            HAL_UART_Receive_DMA(&huart1, port_state.led_packet, 64);
-            break;
-
-        case CMD_COMMIT_LEDS:
-            setStatus(Status_Idle);
-            port_state.should_commit_leds = true;
-            break;
-    }
-}
-
 void USART1_IRQHandler() { HAL_UART_IRQHandler(&huart1); }
 
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{	
-    //DBG_LED2_OFF();
-    setStatus(Status_Idle);
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) { 
+    port_state.flag_tx_complete = true;
 }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    switch (port_state.status) {
-        case Status_Receiving_Command:
-            port_state.current_command = (port_state.raw_command >> 4) & 0x0F;
-            setStatus(Status_Received_Command);
-            break;
-        case Status_Receiving_Data:
-            setStatus(Status_Received_Data);
-            break;
-    }
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    port_state.flag_rx_complete = true;
 }

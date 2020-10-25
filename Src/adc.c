@@ -1,16 +1,17 @@
 #include "adc.h"
 
+#define NUM_SENSORS 4
+#define MIN_SAMPLES_TO_ACCUMULATE 63
+
 // Uses DMA Channel 1
 
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 uint8_t sample_counter = 0;
-uint16_t adc_read_buffer[4];
-uint32_t accumulated_read_buffer[4];
+uint16_t adc_read_buffer[NUM_SENSORS];
+uint32_t accumulated_read_buffer[NUM_SENSORS];
 GuardedData output_data;
-
-bool adc_ready = false;
 
 static void init_adc_periph();
 static void init_adc_channels();
@@ -24,7 +25,18 @@ void adc_init(){
     init_adc_gpio();
     init_adc_channels();
     init_adc_dma();
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_read_buffer, 4);
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_read_buffer, NUM_SENSORS);
+}
+
+void adc_read_into(uint8_t * destination) {
+    output_data.beingRead = true;
+    
+    for (uint8_t i = 0; i < NUM_SENSORS; i++) {
+        destination[i + 0] = output_data.data[i].as_bytes[0];
+        destination[i + 1] = output_data.data[i].as_bytes[1];
+    }
+
+    output_data.beingRead = false;
 }
 
 void adc_start(){
@@ -53,8 +65,10 @@ static void init_adc_periph(){
     hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
     hadc1.Init.LowPowerAutoWait = DISABLE;
     hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
+
     HAL_NVIC_SetPriority(ADC1_IRQn, 0, 1);
     HAL_NVIC_EnableIRQ(ADC1_IRQn);
+
     HAL_ADC_Init(&hadc1);
 }
 
@@ -107,27 +121,29 @@ static void init_adc_dma(){
 
 // HAL interfacing
 
-void ADC_IRQHandler(){
-    HAL_ADC_IRQHandler(&hadc1);
-}
+void ADC_IRQHandler() { HAL_ADC_IRQHandler(&hadc1); }
 
-void DMA1_Channel1_IRQHandler(){
-    HAL_DMA_IRQHandler(&hdma_adc1);
-}
+void DMA1_Channel1_IRQHandler() { HAL_DMA_IRQHandler(&hdma_adc1); }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
-    uint8_t i = 0;
-    if (sample_counter >= 63 && !output_data.beingRead) {
-        for (i = 0; i < 4; i++) {
-            output_data.data[i].as_word = accumulated_read_buffer[i] / sample_counter;
+    // TODO: potential improvement:
+    // only set a flag here, and expose a method to be called in a while loop
+    // to process interrupt flags. That way, the "guarded data" thing isn't
+    // even needed.
+    uint8_t i;
+
+    if (sample_counter >= MIN_SAMPLES_TO_ACCUMULATE && !output_data.beingRead) {
+        for (i = 0; i < NUM_SENSORS; i++) {
+            output_data.data[i].as_word = \
+                accumulated_read_buffer[i] / sample_counter;
+         
             accumulated_read_buffer[i] = 0;
         }
 
         sample_counter = 0;
-        adc_ready = true;
     }
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < NUM_SENSORS; i++) {
         accumulated_read_buffer[i] += adc_read_buffer[i];
     }
 

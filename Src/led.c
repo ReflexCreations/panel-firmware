@@ -2,7 +2,6 @@
 #include "adc.h"
 #include "uart.h"
 
-
 #define LED_PORT GPIOB
 #define LED_PINS GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7
 #define NUM_LEDS 21
@@ -19,10 +18,12 @@ uint16_t *led_pin_ref = &led_pin_pos;
 uint32_t timer_period;
 uint16_t led_data[LEN_BUFFER];
 
+uint8_t sending_buffer = 0;
+
 TIM_HandleTypeDef htim3;
 DMA_HandleTypeDef dma_update;
-DMA_HandleTypeDef dma_channel_1;
-DMA_HandleTypeDef dma_channel_3;
+DMA_HandleTypeDef dma_channel_6;
+DMA_HandleTypeDef dma_channel_2;
 
 static void init_led_gpio();
 static void init_timer_periph();
@@ -35,12 +36,16 @@ void led_init(){
     init_timer_dma();
     init_timer_periph();
     init_timer_events();
+
+    for (uint16_t i = 0; i < LEN_BUFFER; i++) {
+        led_data[i] |= led_pin_pos;
+    }
 }
 
-void led_prepare_input(uint8_t *led_buffer){
+void led_prepare_input(uint8_t *led_buffer) {
     uint16_t lane = led_pin_positions[(led_buffer[0] >> 4) & 0x03];
-    uint8_t l_byte; 
-    for(l_byte = 0; l_byte < 63; l_byte++){
+
+    for(uint8_t l_byte = 0; l_byte < 63; l_byte++) {
         if(led_buffer[l_byte + 1] & (1 << 7)) led_data[l_byte * 8 + 0] &= ~(1 << lane);
         if(led_buffer[l_byte + 1] & (1 << 6)) led_data[l_byte * 8 + 1] &= ~(1 << lane);
         if(led_buffer[l_byte + 1] & (1 << 5)) led_data[l_byte * 8 + 2] &= ~(1 << lane);
@@ -53,14 +58,21 @@ void led_prepare_input(uint8_t *led_buffer){
 }
 
 void led_send_buffer() {
+    DBG_LED2_ON();
     // Stop ADC collection while sending LED buffer
     adc_stop();
-    uart_stop();
+    //uart_stop();
 
+    // Set all LED data pins high one timer update event
 	HAL_DMA_Start(&dma_update, (uint32_t) led_pin_ref, (uint32_t) &LED_PORT->BSRR, LEN_BUFFER);
-	HAL_DMA_Start(&dma_channel_1, (uint32_t) led_data, (uint32_t) &LED_PORT->BRR, LEN_BUFFER);
-	HAL_DMA_Start_IT(&dma_channel_3, (uint32_t) led_pin_ref, (uint32_t) &LED_PORT->BRR, LEN_BUFFER);
-	__HAL_TIM_ENABLE_DMA(&htim3, TIM_DMA_UPDATE | TIM_DMA_CC1 | TIM_DMA_CC3);
+
+    // Resets select LED data lines at one third through timer cycle
+	HAL_DMA_Start(&dma_channel_6, (uint32_t) led_data, (uint32_t) &LED_PORT->BRR, LEN_BUFFER);
+
+    // Reset all LED data lines at two thirds through timer cycle
+    HAL_DMA_Start_IT(&dma_channel_2, (uint32_t) led_pin_ref, (uint32_t) &LED_PORT->BRR, LEN_BUFFER);
+
+    __HAL_TIM_ENABLE_DMA(&htim3, TIM_DMA_UPDATE | TIM_DMA_CC1 | TIM_DMA_CC3);
 	HAL_TIM_Base_Start(&htim3);
 }
 
@@ -80,7 +92,7 @@ static void init_led_gpio(){
 static void init_timer_periph(){
     __HAL_RCC_TIM3_CLK_ENABLE();
 
-    timer_period = SystemCoreClock / 800000;
+    timer_period = 90;
 
     htim3.Instance = TIM3;
     htim3.Init.Period = timer_period;
@@ -95,7 +107,7 @@ static void init_timer_events(){
     TIM_OC_InitTypeDef htimoc;
 
     uint32_t channel_1_event_time = 19;
-    uint32_t channel_3_event_time = 70;
+    uint32_t channel_3_event_time = 60;
 
     htimoc.OCMode = TIM_OCMODE_PWM1;
     htimoc.OCPolarity = TIM_OCPOLARITY_HIGH;
@@ -121,50 +133,50 @@ static void init_timer_dma(){
     __HAL_LINKDMA(&htim3, hdma[TIM_DMA_ID_UPDATE], dma_update);
     HAL_DMA_Init(&dma_update);
 
-    dma_channel_1.Init.Direction = DMA_MEMORY_TO_PERIPH;
-    dma_channel_1.Init.PeriphInc = DMA_PINC_DISABLE;
-    dma_channel_1.Init.MemInc = DMA_MINC_ENABLE;
-    dma_channel_1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
-    dma_channel_1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
-    dma_channel_1.Init.Priority = DMA_PRIORITY_VERY_HIGH;
-    dma_channel_1.Init.Mode = DMA_NORMAL;
-    dma_channel_1.Instance = DMA1_Channel6;
-    __HAL_LINKDMA(&htim3, hdma[TIM_DMA_ID_CC1], dma_channel_1);
-    HAL_DMA_Init(&dma_channel_1);
+    dma_channel_6.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    dma_channel_6.Init.PeriphInc = DMA_PINC_DISABLE;
+    dma_channel_6.Init.MemInc = DMA_MINC_ENABLE;
+    dma_channel_6.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    dma_channel_6.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    dma_channel_6.Init.Priority = DMA_PRIORITY_VERY_HIGH;
+    dma_channel_6.Init.Mode = DMA_NORMAL;
+    dma_channel_6.Instance = DMA1_Channel6;
+    __HAL_LINKDMA(&htim3, hdma[TIM_DMA_ID_CC1], dma_channel_6);
+    HAL_DMA_Init(&dma_channel_6);
 
-    dma_channel_3.Init.Direction = DMA_MEMORY_TO_PERIPH;
-    dma_channel_3.Init.PeriphInc = DMA_PINC_DISABLE;
-    dma_channel_3.Init.MemInc = DMA_MINC_DISABLE;
-    dma_channel_3.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
-    dma_channel_3.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
-    dma_channel_3.Init.Priority = DMA_PRIORITY_VERY_HIGH;
-    dma_channel_3.Init.Mode = DMA_NORMAL;
-    dma_channel_3.Instance = DMA1_Channel2;
-    __HAL_LINKDMA(&htim3, hdma[TIM_DMA_ID_CC3], dma_channel_3);
-    HAL_DMA_Init(&dma_channel_3);
+    dma_channel_2.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    dma_channel_2.Init.PeriphInc = DMA_PINC_DISABLE;
+    dma_channel_2.Init.MemInc = DMA_MINC_DISABLE;
+    dma_channel_2.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    dma_channel_2.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    dma_channel_2.Init.Priority = DMA_PRIORITY_VERY_HIGH;
+    dma_channel_2.Init.Mode = DMA_NORMAL;
+    dma_channel_2.Instance = DMA1_Channel2;
+    __HAL_LINKDMA(&htim3, hdma[TIM_DMA_ID_CC3], dma_channel_2);
+    HAL_DMA_Init(&dma_channel_2);
 
-    dma_channel_3.XferCpltCallback = transfer_complete_handler;
+    dma_channel_2.XferCpltCallback = transfer_complete_handler;
     HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
 }
 
 void DMA1_Channel2_IRQHandler(void){
-    HAL_DMA_IRQHandler(&dma_channel_3);
+    HAL_DMA_IRQHandler(&dma_channel_2);
 }
 
 void transfer_complete_handler(DMA_HandleTypeDef *dma_handle){
     HAL_DMA_Abort(&dma_update);
-    HAL_DMA_Abort(&dma_channel_1);
-    __HAL_TIM_DISABLE_DMA(&htim3, TIM_DMA_UPDATE | TIM_DMA_CC1 | TIM_DMA_CC3);
-    LED_PORT->BRR |= *led_pin_ref;
+    HAL_DMA_Abort(&dma_channel_6);
     HAL_TIM_Base_Stop(&htim3);
+    __HAL_TIM_DISABLE_DMA(&htim3, TIM_DMA_UPDATE | TIM_DMA_CC1 | TIM_DMA_CC3);
+    LED_PORT->BRR |= led_pin_pos;
 
     // Restart the ADC now LED transfer is complete
     adc_start();
-    uart_start();
+    //uart_start();
 
-    for(uint16_t address = 0; address < LEN_BUFFER; address++){
-        led_data[address] = 0xFF;
+    for (uint16_t address = 0; address < LEN_BUFFER; address++){
+        led_data[address] |= led_pin_pos;
     }
 }
 
