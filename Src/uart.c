@@ -10,6 +10,8 @@ static void init_gpio();
 static void init_periph();
 static void init_dma();
 
+static uint8_t ack_msg = MSG_ACKNOWLEGE;
+
 static inline void setStatus(PortStatus newStatus) {
     port_state.status = newStatus;
 }
@@ -34,12 +36,18 @@ static inline uint8_t process_interrupt_flags() {
 
     if (port_state.flag_tx_complete) {
         port_state.flag_tx_complete = false;
-
-        setStatus(Status_Idle);
-        return true;
+        
+        if (port_state.status != Status_Receiving_Data) {
+            setStatus(Status_Idle);
+            return true;
+        }
     }
 
     return false;
+}
+
+static inline void send_acknowledge() {
+    HAL_UART_Transmit_DMA(&huart1, &ack_msg, 1);
 }
 
 void uart_init() {
@@ -91,24 +99,23 @@ void uart_advance() {
                     port_state.receive_length
                 );
 
-                break;
-            }
+                send_acknowledge();
 
-            // Alternatively, if we're expected to send data, go to sending mode
-            // Note: only if we're not also expected to receive more data first            
-            if (port_state.send_length > 0) {
+            } else if (port_state.send_length > 0) {
+                // Alternatively, if we're expected to send data, go to sending mode
+                // Note: only if we're not also expected to receive more data first            
                 setStatus(Status_Sending_Response);
                 HAL_UART_Transmit_DMA(
                     &huart1,
                     port_state.send_data,
                     port_state.send_length
                 );
-
-                break;
+            } else {
+                // If neither of the two apply, done handle command, back to idle.
+                setStatus(Status_Idle);
+                send_acknowledge();
             }
 
-            // If neither of the two apply, done handle command, back to idle.
-            setStatus(Status_Idle);
             break;
 
         // Waiting.
@@ -130,6 +137,7 @@ void uart_advance() {
 
             // Otherwise, go back to Idle.
             setStatus(Status_Idle);
+            send_acknowledge();
             break;
 
         // Waiting.

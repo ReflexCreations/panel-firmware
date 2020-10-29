@@ -6,6 +6,8 @@
 #include "stm32f3xx.h"
 #include "debug_leds.h"
 
+#define MSG_ACKNOWLEGE (0xACU)
+
 typedef enum {
     Status_Idle = 0B000,
     Status_Receiving_Command = 0B0001,
