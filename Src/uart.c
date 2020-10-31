@@ -1,6 +1,8 @@
 #include "uart.h"
 #include "debug_leds.h"
 
+#define DATA_WAIT_TICKS (2U)
+
 DMA_HandleTypeDef hdma_usart1_tx;
 DMA_HandleTypeDef hdma_usart1_rx;
 
@@ -36,10 +38,14 @@ static inline uint8_t process_interrupt_flags() {
 
     if (port_state.flag_tx_complete) {
         port_state.flag_tx_complete = false;
-        
-        if (port_state.status != Status_Receiving_Data) {
+
+        if (port_state.status == Status_Receiving_Data) {
+            // Ack was sent
+            port_state.waiting_since = HAL_GetTick();
+        } else {
+            // If we're not still busy receiving data, return to idle,
+            // as the transaction is then done 
             setStatus(Status_Idle);
-            return true;
         }
     }
 
@@ -48,6 +54,7 @@ static inline uint8_t process_interrupt_flags() {
 
 static inline void send_acknowledge() {
     HAL_UART_Transmit_DMA(&huart1, &ack_msg, 1);
+    port_state.waiting_since = 0;
 }
 
 void uart_init() {
@@ -85,14 +92,6 @@ void uart_advance() {
             if (port_state.receive_length > 0) {
                 setStatus(Status_Receiving_Data);
 
-                // Note: This assumes that we're setting up "receive" quick
-                // enough, as the IO board will just start sending data very
-                // soon after the command.
-                // Should there ever be an issue here where we're not picking
-                // up data after the command, perhaps the system should be
-                // changed to include an acknowledge message being sent back
-                // from the panel, at which time it immediately begins
-                // receiving.
                 HAL_UART_Receive_DMA(
                     &huart1,
                     port_state.receive_data,
@@ -110,16 +109,29 @@ void uart_advance() {
                     port_state.send_data,
                     port_state.send_length
                 );
+
+                // Also immediately start listening for next command
+                HAL_UART_Receive_DMA(&huart1, &port_state.current_command, 1);
             } else {
-                // If neither of the two apply, done handle command, back to idle.
-                setStatus(Status_Idle);
+                // If neither of the two apply, done handle command, back 
+                // to receiving next command
+                setStatus(Status_Receiving_Command);
+                HAL_UART_Receive_DMA(&huart1, &port_state.current_command, 1);
                 send_acknowledge();
             }
 
             break;
 
         // Waiting.
-        case Status_Receiving_Data: break;
+        case Status_Receiving_Data:
+            
+            // Timeout?
+            if (port_state.waiting_since != 0 
+                && HAL_GetTick() - port_state.waiting_since > DATA_WAIT_TICKS) {
+                    HAL_UART_AbortReceive(&huart1);
+                    port_state.status = Status_Idle;
+                }
+            break;
 
         case Status_Received_Data:
             // If we're expecting to send some data back now we've finished
