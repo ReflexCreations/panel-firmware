@@ -32,8 +32,8 @@ void adc_read_into(uint8_t * destination) {
     output_data.beingRead = true;
     
     for (uint8_t i = 0; i < NUM_SENSORS; i++) {
-        destination[i + 0] = output_data.data[i].as_bytes[0];
-        destination[i + 1] = output_data.data[i].as_bytes[1];
+        destination[i * 2 + 0] = output_data.data[i].as_bytes[0];
+        destination[i * 2 + 1] = output_data.data[i].as_bytes[1];
     }
 
     output_data.beingRead = false;
