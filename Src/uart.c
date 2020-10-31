@@ -188,7 +188,7 @@ static void init_gpio() {
 
 static void init_periph() {
     huart1.Instance = USART1;
-    huart1.Init.BaudRate = 4500000;
+    huart1.Init.BaudRate = 3000000;
     huart1.Init.WordLength = UART_WORDLENGTH_8B;
     huart1.Init.StopBits = UART_STOPBITS_2;
     huart1.Init.Parity = UART_PARITY_NONE;
