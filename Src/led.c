@@ -106,8 +106,8 @@ static void init_timer_periph(){
 static void init_timer_events(){
     TIM_OC_InitTypeDef htimoc;
 
-    uint32_t channel_1_event_time = 19;
-    uint32_t channel_3_event_time = 60;
+    uint32_t channel_1_event_time = 16;
+    uint32_t channel_3_event_time = 62;
 
     htimoc.OCMode = TIM_OCMODE_PWM1;
     htimoc.OCPolarity = TIM_OCPOLARITY_HIGH;

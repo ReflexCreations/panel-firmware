@@ -20,8 +20,8 @@ static uint8_t LED_segment_in_buffer[64];
 
 int main(void) {
     init();
-    test();
-    //run();
+    //test();
+    run();
 }
 
 static inline void request_sensors() {
