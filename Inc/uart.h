@@ -22,9 +22,9 @@ typedef struct {
     PortStatus status;
     Commands current_command;
     uint8_t *send_data;
-    uint8_t send_length;
+    uint16_t send_length;
     uint8_t *receive_data;
-    uint8_t receive_length;
+    uint16_t receive_length;
     uint32_t waiting_since;
     uint8_t flag_rx_complete;
     uint8_t flag_tx_complete;

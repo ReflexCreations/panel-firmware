@@ -7,15 +7,28 @@ DMA_HandleTypeDef hdma_usart1_tx;
 DMA_HandleTypeDef hdma_usart1_rx;
 
 void Error_Handler();
+volatile uint8_t uart_receive_not_ok = 0;
 
 static void init_gpio();
 static void init_periph();
 static void init_dma();
 
+static uint8_t ack_cmd[2] = { MSG_ACKNOWLEGE, Command_None };
+
 static uint8_t ack_msg = MSG_ACKNOWLEGE;
 
 static inline void setStatus(PortStatus newStatus) {
     port_state.status = newStatus;
+}
+
+static inline void wait_for_next_command() {
+    port_state.send_data = NULL;
+    port_state.send_length = 0;
+    port_state.receive_data = NULL;
+    port_state.receive_length = 0;
+
+    setStatus(Status_Receiving_Command);
+    HAL_UART_Receive_DMA(&huart1, &port_state.current_command, 1);
 }
 
 // Returns true if any interrupt flags were present
@@ -54,6 +67,12 @@ static inline uint8_t process_interrupt_flags() {
 
 static inline void send_acknowledge() {
     HAL_UART_Transmit_DMA(&huart1, &ack_msg, 1);
+    port_state.waiting_since = HAL_GetTick();
+}
+
+static inline void send_acknowledge_command(Commands cmd) {
+    ack_cmd[1] = (uint8_t)cmd;
+    HAL_UART_Transmit_DMA(&huart1, ack_cmd, 2);
     port_state.waiting_since = 0;
 }
 
@@ -75,13 +94,7 @@ void uart_advance() {
 
     switch (port_state.status) {
         case Status_Idle:
-            port_state.send_data = NULL;
-            port_state.send_length = 0;
-            port_state.receive_data = NULL;
-            port_state.receive_length = 0;
-
-            setStatus(Status_Receiving_Command);
-            HAL_UART_Receive_DMA(&huart1, &port_state.current_command, 1);
+            wait_for_next_command();
             break;
 
         // Waiting.
@@ -92,13 +105,26 @@ void uart_advance() {
             if (port_state.receive_length > 0) {
                 setStatus(Status_Receiving_Data);
 
-                HAL_UART_Receive_DMA(
-                    &huart1,
+                // If for whatever reason HAL thinks we're not ready,
+                // Abort ongoing receive. I'm pretty confident in our own
+                // state machine.
+                if (huart1.RxState != HAL_UART_STATE_READY) {
+                    HAL_UART_AbortReceive(&huart1);
+                }
+
+                HAL_StatusTypeDef hal_result = HAL_UART_Receive_DMA(
+                    &huart1, 
                     port_state.receive_data,
                     port_state.receive_length
                 );
+                
+                // For debugging: make note of what was wrong
+                if (hal_result != HAL_OK) {                    
+                    uart_receive_not_ok = hal_result;
+                    Error_Handler();
+                }
 
-                send_acknowledge();
+                send_acknowledge_command(port_state.current_command);
 
             } else if (port_state.send_length > 0) {
                 // Alternatively, if we're expected to send data, go to sending mode
@@ -113,11 +139,13 @@ void uart_advance() {
                 // Also immediately start listening for next command
                 HAL_UART_Receive_DMA(&huart1, &port_state.current_command, 1);
             } else {
-                // If neither of the two apply, done handle command, back 
-                // to receiving next command
-                setStatus(Status_Receiving_Command);
-                HAL_UART_Receive_DMA(&huart1, &port_state.current_command, 1);
-                send_acknowledge();
+                // If neither apply, then acknowledge command and wait for
+                // next one. Setting up waiting for next one is done
+                // before ACK, so that we are definitely accepting data
+                // before IO board begins sending.
+                Commands cmd = port_state.current_command;
+                wait_for_next_command();
+                send_acknowledge_command(cmd);
             }
 
             break;
@@ -147,8 +175,8 @@ void uart_advance() {
                 break;
             }
 
-            // Otherwise, go back to Idle.
-            setStatus(Status_Idle);
+            // Otherwise, back to waiting for next command
+            wait_for_next_command();
             send_acknowledge();
             break;
 
