@@ -2,7 +2,7 @@
 #define __ADC_H
 
 #include "stm32f3xx_hal.h"
-#include "bool.h"
+#include "stdbool.h"
 
 // Like a 4-element array, but contains a "bool" indicating data is currently
 // being read, so that we can prevent writing to it while that's the case

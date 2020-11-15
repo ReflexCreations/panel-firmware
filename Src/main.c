@@ -2,7 +2,7 @@
 #include "adc.h"
 #include "led.h"
 #include "uart.h"
-#include "bool.h"
+#include "stdbool.h"
 #include "debug_leds.h"
 #include "commands.h"
 #include "commtests.h"

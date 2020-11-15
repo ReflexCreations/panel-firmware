@@ -1,7 +1,7 @@
 #ifndef __UART_H
 #define __UART_H
 
-#include "bool.h"
+#include "stdbool.h"
 #include "commands.h"
 #include "stm32f3xx.h"
 #include "debug_leds.h"
