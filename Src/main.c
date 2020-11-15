@@ -35,7 +35,7 @@ static inline void process_LED_segment() {
 }
 
 static inline void process_LED_segment_data_received() {
-    led_prepare_input(LED_segment_in_buffer);
+    led_stage_buffer(LED_segment_in_buffer);
 }
 
 static inline void commit_LEDs() {

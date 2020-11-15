@@ -69,7 +69,7 @@ static void test_hardcoded_LEDs() {
 
     for (uint8_t segment = 0; segment < 4; segment++) {
         segment_buffer[0] = (segment << 4) & 0x30;
-        led_prepare_input(segment_buffer);
+        led_stage_buffer(segment_buffer);
     }
 
     led_send_buffer();
@@ -86,7 +86,7 @@ static void test_solid_color_LEDs() {
 
     for (uint8_t segment = 0; segment < 4; segment++) {
         segment_buffer[0] = (segment << 4) & 0x30;
-        led_prepare_input(segment_buffer);
+        led_stage_buffer(segment_buffer);
     }
 
     // Remove the actual send here?
@@ -108,7 +108,7 @@ static void test_segment_solid_color_LEDs() {
     }
 
     segment_buffer[0] = (segment << 4) & 0x30;
-    led_prepare_input(segment_buffer);
+    led_stage_buffer(segment_buffer);
 }
 
 static void test_commit_leds() {

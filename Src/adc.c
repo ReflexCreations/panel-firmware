@@ -25,7 +25,6 @@ void adc_init(){
     init_adc_gpio();
     init_adc_channels();
     init_adc_dma();
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_read_buffer, NUM_SENSORS);
 }
 
 void adc_read_into(uint8_t * destination) {
@@ -39,13 +38,15 @@ void adc_read_into(uint8_t * destination) {
     output_data.beingRead = false;
 }
 
-void adc_start(){
-    adc_init();
+// Note: ADC is first started after finishing an LED commit.
+// Such a commit is done on startup, so this will always start the ADC.
+// However, starting it in adc_init() makes LED flickery.
+void adc_start() {
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_read_buffer, NUM_SENSORS);
 }
 
 void adc_stop(){
-    HAL_DMA_Abort(&hdma_adc1);
-    HAL_ADC_DeInit(&hadc1);
+    HAL_ADC_Stop_DMA(&hadc1);
 }
 
 // "Private" functions
