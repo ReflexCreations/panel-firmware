@@ -25,6 +25,7 @@ void adc_init(){
     init_adc_gpio();
     init_adc_channels();
     init_adc_dma();
+    adc_start();
 }
 
 void adc_read_into(uint8_t * destination) {

@@ -132,14 +132,6 @@ void led_send_buffer() {
 
     sending_buffer = true;
 
-    // Stop ADC collection while sending LED buffer
-    adc_stop();
-
-    // This NOP is pretty critical; without it, the LEDs tend to become a
-    // flickery mess. Likely something to do with properly shutting off the
-    // the DMA requests from the ADC prior to starting our ones here.
-    NOP;
-
     // Set all LED data pins high on timer update event
 	HAL_DMA_Start_IT(
         &dma_ch2_tim_ch1,
@@ -165,6 +157,11 @@ void led_send_buffer() {
         (uint32_t) &LED_PORT->BRR,
         LEN_BUFFER
     );
+
+    // Very important to ensure LEDs are synchronised right.
+    // Without this there can be an off-by-one error that causes a flickery
+    // mess on the LEDs.
+    TIM1->CNT = 0;
 
     __HAL_TIM_ENABLE_DMA(&htim1, TIM_DMA_CC1 | TIM_DMA_CC2 | TIM_DMA_CC3);
 	HAL_TIM_Base_Start(&htim1);
@@ -322,15 +319,8 @@ static void transfer_complete_handler(DMA_HandleTypeDef *dma_handle){
     if (dma_handle != &dma_ch2_tim_ch1) return;
 
     HAL_TIM_Base_Stop(&htim1);
-    
-    // As in led_send_buffer, this NOP instruction is important to properly
-    // finish DMA; otherwise, flickery mess.
-    NOP;
 
     LED_PORT->BRR |= led_pin_pos;
-    
-    // Restart the ADC now LED transfer is complete
-    adc_start();
 
     // Clear LED data
     // This is also done elsewhere, but leaving it here reduces LED flickering
