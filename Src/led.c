@@ -32,8 +32,8 @@
 // CC2_VAL sets the time at which we go back to 0 in case of a "0" bit
 // CC3_VAL sets the time at which we go back to 0 regardless of "0" or "1" bit.
 #define LED_TIMER_PERIOD  90
-#define LED_TIMER_CC2_VAL 20
-#define LED_TIMER_CC3_VAL 70
+#define LED_TIMER_CC2_VAL 16
+#define LED_TIMER_CC3_VAL 60
 
 #define NOP asm("nop")
 
@@ -132,8 +132,17 @@ void led_send_buffer() {
 
     sending_buffer = true;
 
+	__HAL_DMA_CLEAR_FLAG(&dma_ch2_tim_ch1, DMA_FLAG_TC2 | DMA_FLAG_HT2 | DMA_FLAG_TE2);
+	__HAL_DMA_CLEAR_FLAG(&dma_ch3_tim_ch2, DMA_FLAG_TC3 | DMA_FLAG_HT3 | DMA_FLAG_TE3);
+	__HAL_DMA_CLEAR_FLAG(&dma_ch6_tim_ch3, DMA_FLAG_TC6 | DMA_FLAG_HT6 | DMA_FLAG_TE6);
+	__HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_UPDATE | TIM_FLAG_CC1 | TIM_FLAG_CC2 | TIM_FLAG_CC3);
+
+    //init_timer_dma();
+    //init_timer_periph();
+    //init_timer_events();
+
     // Set all LED data pins high on timer update event
-	HAL_DMA_Start_IT(
+    HAL_DMA_Start_IT(
         &dma_ch2_tim_ch1,
         (uint32_t) &led_pin_pos,
         (uint32_t) &LED_PORT->BSRR,
@@ -158,13 +167,13 @@ void led_send_buffer() {
         LEN_BUFFER
     );
 
+     __HAL_TIM_ENABLE_DMA(&htim1, TIM_DMA_CC1 | TIM_DMA_CC2 | TIM_DMA_CC3);
+
     // Very important to ensure LEDs are synchronised right.
     // Without this there can be an off-by-one error that causes a flickery
-    // mess on the LEDs.
-    TIM1->CNT = 0;
-
-    __HAL_TIM_ENABLE_DMA(&htim1, TIM_DMA_CC1 | TIM_DMA_CC2 | TIM_DMA_CC3);
-	HAL_TIM_Base_Start(&htim1);
+    // mess on the LEDs
+    TIM1->CNT = LED_TIMER_PERIOD - 1;
+	__HAL_TIM_ENABLE(&htim1);
 }
 
 // Private functions
@@ -180,6 +189,10 @@ static void init_led_gpio(){
     HAL_GPIO_Init(LED_PORT, &led_gpio);
 }
 
+void TIM1_IRQHandler(void){
+    HAL_TIM_IRQHandler(&htim1);
+}
+
 static void init_timer_periph(){
     __HAL_RCC_TIM1_CLK_ENABLE();
 
@@ -191,12 +204,14 @@ static void init_timer_periph(){
     htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
     htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
     HAL_TIM_Base_Init(&htim1);
+    HAL_NVIC_SetPriority(TIM1_CC_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(TIM1_CC_IRQn);
 
     TIM_ClockConfigTypeDef sClockSourceConfig = {0};
     sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
     HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig);
 
-    HAL_TIM_OC_Init(&htim1);
+    HAL_TIM_PWM_Init(&htim1);
 
     TIM_MasterConfigTypeDef sMasterConfig = {0};
     sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
@@ -219,13 +234,13 @@ static void init_timer_events(){
     htimoc.OCNIdleState = TIM_OCNIDLESTATE_RESET;
 
     htimoc.Pulse = channel_1_event_time;
-    HAL_TIM_OC_ConfigChannel(&htim1, &htimoc, TIM_CHANNEL_1);
+    HAL_TIM_PWM_ConfigChannel(&htim1, &htimoc, TIM_CHANNEL_1);
 
     htimoc.Pulse = channel_2_event_time;
-    HAL_TIM_OC_ConfigChannel(&htim1, &htimoc, TIM_CHANNEL_2);
+    HAL_TIM_PWM_ConfigChannel(&htim1, &htimoc, TIM_CHANNEL_2);
 
     htimoc.Pulse = channel_3_event_time;
-    HAL_TIM_OC_ConfigChannel(&htim1, &htimoc, TIM_CHANNEL_3);
+    HAL_TIM_PWM_ConfigChannel(&htim1, &htimoc, TIM_CHANNEL_3);
 
     TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
     sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
@@ -317,17 +332,18 @@ static void transfer_complete_handler(DMA_HandleTypeDef *dma_handle){
     }
 
     if (dma_handle != &dma_ch2_tim_ch1) return;
-
-    HAL_TIM_Base_Stop(&htim1);
+    __HAL_TIM_DISABLE(&htim1);
+    TIM1->CR1 = 0;
+    __HAL_TIM_DISABLE_IT(&htim1, TIM_IT_CC1 | TIM_IT_CC2 | TIM_IT_CC3);
 
     LED_PORT->BRR |= led_pin_pos;
 
     // Clear LED data
     // This is also done elsewhere, but leaving it here reduces LED flickering
     // too.
-    for (uint16_t address = 0; address < LEN_BUFFER; address++){
+    /*for (uint16_t address = 0; address < LEN_BUFFER; address++){
         led_data[address] |= led_pin_pos;
-    }
+    }*/
 
     sending_buffer = false;
 
