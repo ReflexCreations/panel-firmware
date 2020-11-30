@@ -338,13 +338,6 @@ static void transfer_complete_handler(DMA_HandleTypeDef *dma_handle){
 
     LED_PORT->BRR |= led_pin_pos;
 
-    // Clear LED data
-    // This is also done elsewhere, but leaving it here reduces LED flickering
-    // too.
-    /*for (uint16_t address = 0; address < LEN_BUFFER; address++){
-        led_data[address] |= led_pin_pos;
-    }*/
-
     sending_buffer = false;
 
     DBG_LED3_OFF();
