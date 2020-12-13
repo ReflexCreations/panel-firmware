@@ -22,6 +22,7 @@ The release contains firmware to program the RE:Flex Dance Panel board. At curre
 - Being able to turn light data on/off in firmware would be helpful for debugging, and for future revisions of panel boards without LEDs.
 - The UART bus system has a limited command set. More commands could be implemented for testing, debugging, jumping into the UART programmer, resetting the boards, etc.
 - Currently if the board receives data to display on the LEDs, and the connection is then removed, the LEDs will remain active. This is a bit of a power waste and an eyesore. The panel board could overcome this by checking if it has received by implementing a time out if data hasn't been sent by the PC in some amount of time (maybe a second or so). Then the timeout could trigger an LED update to turn all LEDs off.
+- EEPROM emulation for setting storage and a command to toggle status LEDs on or off would be good for switching debugging off to prevent status LEDs from being unsightly.
 
 ## License
 
